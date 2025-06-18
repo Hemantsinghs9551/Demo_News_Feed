@@ -1,6 +1,4 @@
-
 import React, { useEffect, useState, useRef } from 'react';
-
 import {
   SafeAreaView,
   View,
@@ -44,12 +42,21 @@ export default function App() {
 
     try {
       const state = await NetInfo.fetch();
+
       if (!state.isConnected) {
-        const cached = await AsyncStorage.getItem('cachedArticles');
-        if (cached) {
-          setArticles(JSON.parse(cached));
-        } else {
-          Alert.alert('No Internet', 'Please connect to the internet.');
+        console.log('Offline mode: trying to load cached data');
+        try {
+          const cached = await AsyncStorage.getItem('cachedArticles');
+          if (cached) {
+            const parsed = JSON.parse(cached);
+            setArticles(parsed);
+            console.log('Loaded cached articles:', parsed.length);
+          } else {
+            Alert.alert('No Internet', 'No cached data available.');
+          }
+        } catch (e) {
+          console.error('Failed to load cache', e);
+          Alert.alert('Cache Error', 'Failed to load cached articles.');
         }
         return;
       }
@@ -61,8 +68,14 @@ export default function App() {
       const newArticles = res.data.articles || [];
 
       setArticles(newArticles);
-      await AsyncStorage.setItem('cachedArticles', JSON.stringify(newArticles));
+      console.log('Fetched articles:', newArticles.length);
+
+      if (newArticles.length > 0) {
+        await AsyncStorage.setItem('cachedArticles', JSON.stringify(newArticles));
+        console.log('Cached articles successfully.');
+      }
     } catch (err) {
+      console.error('Fetch error:', err);
       Alert.alert('Error', 'Something went wrong.');
     } finally {
       setLoading(false);
@@ -186,6 +199,13 @@ export default function App() {
             loading && !skeletonLoading ? <ActivityIndicator size="large" /> : null
           }
           keyboardShouldPersistTaps="handled"
+          ListEmptyComponent={
+            !skeletonLoading && articles.length === 0 ? (
+              <Text style={{ fontSize, textAlign: 'center', marginTop: margin }}>
+                No articles available offline.
+              </Text>
+            ) : null
+          }
         />
       </SafeAreaView>
     </GestureHandlerRootView>
