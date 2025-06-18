@@ -1,4 +1,6 @@
+
 import React, { useEffect, useState, useRef } from 'react';
+
 import {
   SafeAreaView,
   View,
@@ -88,7 +90,7 @@ export default function App() {
 
     debounceRef.current = setTimeout(() => {
       fetchArticles(true, text);
-    }, 800); // 800ms debounce
+    }, 800);
   };
 
   useEffect(() => {
