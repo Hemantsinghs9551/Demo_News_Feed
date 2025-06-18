@@ -1,5 +1,4 @@
-// App.js
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   SafeAreaView,
   View,
@@ -10,29 +9,37 @@ import {
   TextInput,
   StyleSheet,
   Alert,
+  Keyboard,
   Platform,
   StatusBar,
-  Keyboard,
+  Image,
+  useWindowDimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import axios from 'axios';
 import NetInfo from '@react-native-community/netinfo';
 import { GestureHandlerRootView, Swipeable } from 'react-native-gesture-handler';
 
-const API_KEY = '863633299253477f8c8134a02e767f96';
-const PAGE_SIZE = 10;
-
 export default function App() {
+  const { width, height } = useWindowDimensions();
   const [articles, setArticles] = useState([]);
-  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [hasMore, setHasMore] = useState(true);
   const [skeletonLoading, setSkeletonLoading] = useState(true);
+  const debounceRef = useRef(null);
 
-  const fetchArticles = async (pageNum = 1, isRefresh = false, customQuery = searchQuery) => {
-    const url = `https://newsapi.org/v2/top-headlines?country=us&category=business&pageSize=${PAGE_SIZE}&page=${pageNum}&q=${customQuery}&apiKey=${API_KEY}`;
+  const padding = width * 0.04;
+  const margin = width * 0.03;
+  const fontSize = width * 0.045;
+  const imageHeight = height * 0.25;
+
+  const fetchArticles = async (isRefresh = false, query = '') => {
+    const baseURL = 'https://newsapi.org/v2/top-headlines';
+    const url = query
+      ? `${baseURL}?q=${encodeURIComponent(query)}&apiKey=863633299253477f8c8134a02e767f96`
+      : `${baseURL}?sources=techcrunch&apiKey=863633299253477f8c8134a02e767f96`;
+
     try {
       const state = await NetInfo.fetch();
       if (!state.isConnected) {
@@ -45,19 +52,13 @@ export default function App() {
         return;
       }
 
-      if (isRefresh) {
-        setSkeletonLoading(true);
-      }
-      setLoading(true);
-      const res = await axios.get(url);
-      const newArticles = res.data.articles;
+      if (isRefresh) setSkeletonLoading(true);
+      else setLoading(true);
 
-      setHasMore(newArticles.length >= PAGE_SIZE);
-      if (isRefresh) {
-        setArticles(newArticles);
-      } else {
-        setArticles(prev => (pageNum === 1 ? newArticles : [...prev, ...newArticles]));
-      }
+      const res = await axios.get(url);
+      const newArticles = res.data.articles || [];
+
+      setArticles(newArticles);
       await AsyncStorage.setItem('cachedArticles', JSON.stringify(newArticles));
     } catch (err) {
       Alert.alert('Error', 'Something went wrong.');
@@ -68,39 +69,54 @@ export default function App() {
     }
   };
 
-  const handleLoadMore = () => {
-    if (!loading && hasMore) {
-      setPage(prev => prev + 1);
-    }
-  };
-
   const handleRefresh = () => {
     setRefreshing(true);
-    setPage(1);
-    fetchArticles(1, true);
+    fetchArticles(true, searchQuery);
   };
-
-  useEffect(() => {
-    fetchArticles(page);
-  }, [page]);
 
   const handleSearchSubmit = () => {
     Keyboard.dismiss();
-    setPage(1);
-    fetchArticles(1, true, searchQuery);
+    fetchArticles(true, searchQuery);
   };
 
+  const onSearchChange = (text) => {
+    setSearchQuery(text);
+
+    if (debounceRef.current) {
+      clearTimeout(debounceRef.current);
+    }
+
+    debounceRef.current = setTimeout(() => {
+      fetchArticles(true, text);
+    }, 800); // 800ms debounce
+  };
+
+  useEffect(() => {
+    fetchArticles();
+  }, []);
+
   const renderLeftActions = () => (
-    <View style={styles.swipeActionLike}><Text style={styles.swipeText}>👍 Like</Text></View>
+    <View style={[styles.swipeAction, { backgroundColor: '#4CAF50', padding }]}>
+      <Text style={[styles.swipeText, { fontSize }]}>👍 Like</Text>
+    </View>
   );
+
   const renderRightActions = () => (
-    <View style={styles.swipeActionBookmark}><Text style={styles.swipeText}>🔖 Bookmark</Text></View>
+    <View style={[styles.swipeAction, { backgroundColor: '#2196F3', padding }]}>
+      <Text style={[styles.swipeText, { fontSize }]}>🔖 Bookmark</Text>
+    </View>
   );
 
   const renderSkeleton = () => (
-    <View style={styles.articleContainer}>
-      <View style={styles.skeletonTitle} />
-      <View style={styles.skeletonDesc} />
+    <View style={[styles.articleContainer, {
+      width: width * 0.95,
+      paddingHorizontal: padding,
+      paddingVertical: padding,
+      marginBottom: margin,
+    }]}>
+      <View style={[styles.skeletonBox, { height: imageHeight, width: '100%', marginBottom: margin }]} />
+      <View style={[styles.skeletonBox, { height: fontSize * 1.2, width: '80%', marginBottom: margin / 2 }]} />
+      <View style={[styles.skeletonBox, { height: fontSize, width: '95%' }]} />
     </View>
   );
 
@@ -109,32 +125,64 @@ export default function App() {
       renderLeftActions={renderLeftActions}
       renderRightActions={renderRightActions}
     >
-      <View style={styles.articleContainer}>
-        <Text style={styles.title}>{item.title}</Text>
-        <Text>{item.description}</Text>
+      <View style={[styles.articleContainer, {
+        width: width * 0.95,
+        paddingHorizontal: padding,
+        paddingVertical: padding,
+        marginBottom: margin,
+      }]}>
+        {item.urlToImage ? (
+          <Image
+            source={{ uri: item.urlToImage }}
+            style={{
+              width: '100%',
+              height: imageHeight,
+              borderRadius: width * 0.02,
+              marginBottom: margin,
+              resizeMode: 'cover',
+            }}
+          />
+        ) : null}
+        <Text style={{ fontSize, fontWeight: 'bold', marginBottom: margin / 2 }}>{item.title}</Text>
+        <Text style={{ fontSize: fontSize * 0.9 }}>{item.description}</Text>
       </View>
     </Swipeable>
   );
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <SafeAreaView style={styles.safeArea}>
+      <SafeAreaView style={[styles.safeArea, {
+        paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
+      }]}>
         <TextInput
-          style={styles.searchBar}
+          style={{
+            width: width * 0.95,
+            borderColor: '#ccc',
+            borderWidth: 1,
+            borderRadius: width * 0.02,
+            backgroundColor: '#fff',
+            paddingVertical: padding / 2,
+            paddingHorizontal: padding,
+            marginVertical: margin,
+            fontSize
+          }}
           placeholder="Search..."
           value={searchQuery}
-          onChangeText={setSearchQuery}
+          onChangeText={onSearchChange}
           onSubmitEditing={handleSearchSubmit}
           returnKeyType="search"
         />
+
         <FlatList
           data={skeletonLoading ? Array(5).fill({}) : articles}
           renderItem={skeletonLoading ? () => renderSkeleton() : renderItem}
-          keyExtractor={(item, index) => item.title + index}
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.5}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />}
-          ListFooterComponent={loading && !skeletonLoading ? <ActivityIndicator size="large" /> : null}
+          keyExtractor={(item, index) => (item.title || 'key') + index}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} />
+          }
+          ListFooterComponent={
+            loading && !skeletonLoading ? <ActivityIndicator size="large" /> : null
+          }
           keyboardShouldPersistTaps="handled"
         />
       </SafeAreaView>
@@ -145,55 +193,26 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    paddingTop: Platform.OS === 'android' ? StatusBar.currentHeight : 0,
     backgroundColor: '#f8f8f8',
+    alignItems: 'center',
   },
   articleContainer: {
-    padding: 16,
-    borderBottomColor: '#ccc',
+    backgroundColor: '#fff',
+    borderRadius: 12,
+    alignSelf: 'center',
     borderBottomWidth: 1,
-    backgroundColor: '#fff',
+    borderBottomColor: '#ccc',
   },
-  title: {
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  searchBar: {
-    padding: 12,
-    borderColor: '#ccc',
-    borderWidth: 1,
-    margin: 10,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  swipeActionLike: {
-    backgroundColor: '#4CAF50',
+  swipeAction: {
     justifyContent: 'center',
     flex: 1,
-    alignItems: 'flex-start',
-    padding: 20,
-  },
-  swipeActionBookmark: {
-    backgroundColor: '#2196F3',
-    justifyContent: 'center',
-    flex: 1,
-    alignItems: 'flex-end',
-    padding: 20,
+    alignItems: 'center',
   },
   swipeText: {
     color: '#fff',
     fontWeight: 'bold',
   },
-  skeletonTitle: {
-    width: '80%',
-    height: 20,
-    backgroundColor: '#e0e0e0',
-    marginBottom: 10,
-    borderRadius: 4,
-  },
-  skeletonDesc: {
-    width: '100%',
-    height: 14,
+  skeletonBox: {
     backgroundColor: '#e0e0e0',
     borderRadius: 4,
   },
